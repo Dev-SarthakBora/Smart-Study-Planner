@@ -1,10 +1,14 @@
 """
-PrepPal Backend API
+PrepPal Backend API - Updated
 FastAPI backend for RAG-based study assistant with quiz generation and study planning
-Now fully integrated with Google Gemini AI
+Added: Agora Conversational AI REST endpoints (/start-agent, /stop-agent)
+Notes:
+- Provide AGORA_CUSTOMER_ID and AGORA_CUSTOMER_SECRET for REST basic auth.
+- For quick tests provide AGORA_TEMP_AGENT_TOKEN env var (temporary RTC token for agent) or pass `agent_token` in /start-agent body.
+- Do NOT store Customer Secret on frontend.
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -17,7 +21,10 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 import fitz  # PyMuPDF for PDF processing
 import base64
-from pydantic import BaseModel
+import requests
+import logging
+logger = logging.getLogger("preppal")
+logging.basicConfig(level=logging.INFO)
 # Load environment variables
 load_dotenv()
 
@@ -28,7 +35,19 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-app = FastAPI(title="PrepPal API", version="1.0.0")
+# Agora config (for Conversational AI REST)
+AGORA_APP_ID = os.getenv("AGORA_APP_ID")
+AGORA_CUSTOMER_ID = os.getenv("AGORA_CUSTOMER_ID")
+AGORA_CUSTOMER_SECRET = os.getenv("AGORA_CUSTOMER_SECRET")
+# Optional quick test token to allow agents to join without generating tokens
+AGORA_TEMP_AGENT_TOKEN = os.getenv("AGORA_TEMP_AGENT_TOKEN")
+
+if not AGORA_APP_ID:
+    print("Warning: AGORA_APP_ID not set. Start/stop agent endpoints will fail without it.")
+if not (AGORA_CUSTOMER_ID and AGORA_CUSTOMER_SECRET):
+    print("Warning: AGORA_CUSTOMER_ID or AGORA_CUSTOMER_SECRET not set. Start/stop agent endpoints will fail without them.")
+
+app = FastAPI(title="PrepPal API", version="1.1.0")
 
 # CORS middleware for Streamlit
 app.add_middleware(
@@ -39,21 +58,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-
-
-
-
 # ============ In-Memory Storage ============
-documents_store = {}  # {doc_id: {filename, chunks, embeddings, metadata}}
+documents_store = {}  # {doc_id: {filename, chunks, embeddings(list), metadata}}
 chat_history = []
 
 # ============ Pydantic Models ============
-
 class ChatRequest(BaseModel):
     user_id: str = "default_user"
     message: str
     doc_ids: Optional[List[str]] = None
+    agent_id: Optional[str] = None
+    voice: Optional[bool] = False
 
 class ChatResponse(BaseModel):
     answer: str
@@ -86,18 +101,26 @@ class PlanResponse(BaseModel):
 
 # ============ Helper Functions ============
 
-def chunk_text(text: str, chunk_size: int = 500) -> List[str]:
+
+
+
+
+def chunk_text(text: str, chunk_size: int = 200) -> List[str]:
     """Split text into chunks of approximately chunk_size words"""
     words = text.split()
+    if not words:
+        return [""]
     chunks = []
     for i in range(0, len(words), chunk_size):
         chunk = ' '.join(words[i:i + chunk_size])
         chunks.append(chunk)
-    return chunks if chunks else [""]
+    return chunks
 
-def create_embeddings(texts: List[str]) -> np.ndarray:
+
+def create_embeddings(texts: List[str]) -> List[List[float]]:
     """
     Create embeddings for text chunks using Gemini embedding model
+    Returns list-of-lists (serializable)
     """
     try:
         embeddings_list = []
@@ -107,23 +130,27 @@ def create_embeddings(texts: List[str]) -> np.ndarray:
                 content=text,
                 task_type="retrieval_document"
             )
-            embeddings_list.append(result['embedding'])
-        
-        embeddings = np.array(embeddings_list)
-        # Normalize embeddings
-        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-        return embeddings
+            emb = result['embedding']
+            # normalize
+            arr = np.array(emb)
+            norm = np.linalg.norm(arr)
+            if norm > 0:
+                arr = arr / norm
+            embeddings_list.append(arr.tolist())
+        return embeddings_list
     except Exception as e:
         print(f"Error creating embeddings: {str(e)}")
         # Fallback to random embeddings if API fails
         embeddings = np.random.randn(len(texts), 768)
         embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-        return embeddings
+        return embeddings.tolist()
+
 
 def cosine_similarity(query_embedding: np.ndarray, doc_embeddings: np.ndarray) -> np.ndarray:
     """Calculate cosine similarity between query and document embeddings"""
-    similarities = np.dot(doc_embeddings, query_embedding)
-    return similarities
+    # query_embedding: (D,), doc_embeddings: (N,D)
+    return np.dot(doc_embeddings, query_embedding)
+
 
 def retrieve_relevant_chunks(query: str, doc_ids: Optional[List[str]] = None, top_k: int = 5) -> List[Dict]:
     """Retrieve top-k most relevant chunks using cosine similarity"""
@@ -139,14 +166,13 @@ def retrieve_relevant_chunks(query: str, doc_ids: Optional[List[str]] = None, to
     except Exception as e:
         print(f"Error creating query embedding: {str(e)}")
         return []
-    
-    # Collect all chunks and embeddings
+
     all_chunks = []
     all_embeddings = []
     sources = []
-    
+
     target_docs = doc_ids if doc_ids else list(documents_store.keys())
-    
+
     for doc_id in target_docs:
         if doc_id in documents_store:
             doc = documents_store[doc_id]
@@ -158,17 +184,15 @@ def retrieve_relevant_chunks(query: str, doc_ids: Optional[List[str]] = None, to
                     'filename': doc['filename'],
                     'chunk_index': i
                 })
-    
+
     if not all_embeddings:
         return []
-    
-    # Calculate similarities
+
     embeddings_matrix = np.array(all_embeddings)
     similarities = cosine_similarity(query_embedding, embeddings_matrix)
-    
-    # Get top-k indices
+
     top_indices = np.argsort(similarities)[-top_k:][::-1]
-    
+
     results = []
     for idx in top_indices:
         results.append({
@@ -176,83 +200,52 @@ def retrieve_relevant_chunks(query: str, doc_ids: Optional[List[str]] = None, to
             'score': float(similarities[idx]),
             'source': sources[idx]
         })
-    
+
     return results
+
 
 def generate_answer_with_llm(query: str, context_chunks: List[Dict]) -> str:
     """
     Generate answer using Gemini with RAG
     """
     try:
-        # Build context from retrieved chunks
-        context = "\n\n".join([f"[Source: {c['source']['filename']}, Chunk {c['source']['chunk_index']}]\n{c['text']}" 
-                               for c in context_chunks])
-        
-        # Prompt template for RAG
-        prompt = f"""You are PrepPal, a helpful study assistant. Answer the student's question using ONLY the information provided in the context below. If the answer cannot be found in the context, say "I couldn't find that information in your study materials."
-
-Context:
-{context}
-
-Question: {query}
-
-Answer:"""
-        
         if not context_chunks:
             return "I don't have any study materials to reference yet. Please upload some documents first!"
-        
-        # Generate response using Gemini
+
+        context = "\n\n".join([f"[Source: {c['source']['filename']}, Chunk {c['source']['chunk_index']}]\n{c['text']}" 
+                                   for c in context_chunks])
+
+        prompt = f"""You are PrepPal, a helpful study assistant. Answer the student's question using ONLY the information provided in the context below. If the answer cannot be found in the context, say "I couldn't find that information in your study materials."\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"""
+
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
-        
+
         return response.text
     except Exception as e:
         print(f"Error generating answer: {str(e)}")
         return f"I encountered an error while generating the answer. Please try again."
+
 
 def generate_quiz_with_llm(topic: str, context_chunks: List[Dict], num_questions: int = 5) -> List[QuizQuestion]:
     """
     Generate quiz questions using Gemini with structured output
     """
     try:
-        # Build context from chunks
         context = "\n\n".join([chunk['text'] for chunk in context_chunks[:5]])  # Use top 5 chunks
-        
-        prompt = f"""You are an expert quiz generator. Based on the following study material about {topic}, create {num_questions} multiple-choice questions.
 
-Study Material:
-{context}
-
-Generate exactly {num_questions} multiple-choice questions in JSON format. Each question should have:
-- question: A clear, specific question
-- options: Exactly 4 answer options (as an array)
-- correct_index: The index (0-3) of the correct answer
-- explanation: A brief explanation of why the answer is correct
-
-Return ONLY a valid JSON array of questions, no additional text. Format:
-[
-  {{
-    "question": "Question text here?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct_index": 0,
-    "explanation": "Explanation here."
-  }}
-]"""
+        prompt = f"""You are an expert quiz generator. Based on the following study material about {topic}, create {num_questions} multiple-choice questions.\n\nStudy Material:\n{context}\n\nGenerate exactly {num_questions} multiple-choice questions in JSON format. Each question should have: question, options (4), correct_index (0-3), explanation. Return ONLY a valid JSON array of questions, no additional text."""
 
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
-        
-        # Parse JSON response
+
         response_text = response.text.strip()
-        # Remove markdown code blocks if present
         if response_text.startswith("```json"):
             response_text = response_text.split("```json")[1].split("```")[0].strip()
         elif response_text.startswith("```"):
             response_text = response_text.split("```")[1].split("```")[0].strip()
-        
+
         questions_data = json.loads(response_text)
-        
-        # Convert to QuizQuestion objects
+
         quiz_questions = []
         for q_data in questions_data[:num_questions]:
             quiz_questions.append(QuizQuestion(
@@ -261,11 +254,11 @@ Return ONLY a valid JSON array of questions, no additional text. Format:
                 correct_index=q_data['correct_index'],
                 explanation=q_data['explanation']
             ))
-        
+
         return quiz_questions
     except Exception as e:
         print(f"Error generating quiz: {str(e)}")
-        # Fallback to generic questions
+        # Fallback
         return [
             QuizQuestion(
                 question=f"What is a key concept in {topic}?",
@@ -275,6 +268,7 @@ Return ONLY a valid JSON array of questions, no additional text. Format:
             )
         ] * min(num_questions, 5)
 
+
 def generate_study_plan(exam_date: str, hours_per_day: float, subjects: List[str]) -> List[Dict]:
     """
     Generate a personalized study plan using Gemini
@@ -283,47 +277,23 @@ def generate_study_plan(exam_date: str, hours_per_day: float, subjects: List[str
         exam_datetime = datetime.strptime(exam_date, "%Y-%m-%d")
         today = datetime.now()
         days_until_exam = (exam_datetime - today).days
-        
+
         if days_until_exam <= 0:
             days_until_exam = 7  # Default to 1 week if date is past
-        
-        # Generate plan with Gemini
-        prompt = f"""Create a detailed {days_until_exam}-day study plan for the following:
-- Exam Date: {exam_date}
-- Daily Study Hours: {hours_per_day}
-- Subjects: {', '.join(subjects)}
 
-Generate a day-by-day breakdown in JSON format. Each day should include:
-- day: day number (1 to {days_until_exam})
-- subject: which subject to focus on
-- hours: study hours for that day
-- topics: array of 2-3 specific topics to cover
-- tips: a brief study tip for that day
-
-Distribute subjects evenly across days. Return ONLY valid JSON array, no additional text:
-[
-  {{
-    "day": 1,
-    "subject": "Subject Name",
-    "hours": {hours_per_day},
-    "topics": ["Topic 1", "Topic 2"],
-    "tips": "Study tip here"
-  }}
-]"""
+        prompt = f"""Create a detailed {days_until_exam}-day study plan for the following:\n- Exam Date: {exam_date}\n- Daily Study Hours: {hours_per_day}\n- Subjects: {', '.join(subjects)}\n\nGenerate a day-by-day breakdown in JSON format. Each day should include day, subject, hours, topics (2-3), tips. Return ONLY valid JSON array, no additional text."""
 
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
-        
-        # Parse response
+
         response_text = response.text.strip()
         if response_text.startswith("```json"):
             response_text = response_text.split("```json")[1].split("```")[0].strip()
         elif response_text.startswith("```"):
             response_text = response_text.split("```")[1].split("```")[0].strip()
-        
+
         plan_data = json.loads(response_text)
-        
-        # Add dates and completed status
+
         plan = []
         for i, day_plan in enumerate(plan_data[:days_until_exam]):
             date = today + timedelta(days=i)
@@ -336,17 +306,18 @@ Distribute subjects evenly across days. Return ONLY valid JSON array, no additio
                 "tips": day_plan.get('tips', ''),
                 "completed": False
             })
-        
+
         return plan
     except Exception as e:
         print(f"Error generating study plan: {str(e)}")
-        # Fallback to simple plan
+        # Fallback simple plan
+        today = datetime.now()
         plan = []
-        for day in range(days_until_exam):
+        days = max(7, (datetime.strptime(exam_date, "%Y-%m-%d") - today).days)
+        for day in range(days):
             date = today + timedelta(days=day)
             subject_index = day % len(subjects) if subjects else 0
             current_subject = subjects[subject_index] if subjects else "General Study"
-            
             plan.append({
                 "day": day + 1,
                 "date": date.strftime("%Y-%m-%d"),
@@ -356,8 +327,8 @@ Distribute subjects evenly across days. Return ONLY valid JSON array, no additio
                 "tips": "Review and practice consistently",
                 "completed": False
             })
-        
         return plan
+
 
 def extract_text_from_pdf(content: bytes) -> str:
     """Extract text from PDF using PyMuPDF"""
@@ -372,43 +343,184 @@ def extract_text_from_pdf(content: bytes) -> str:
         print(f"Error extracting PDF text: {str(e)}")
         return ""
 
+# ============ Agora helper functions ============
+
+def agora_basic_auth_header() -> Dict[str, str]:
+    if not (AGORA_CUSTOMER_ID and AGORA_CUSTOMER_SECRET):
+        raise ValueError("Agora Customer ID/Secret not configured in environment")
+    pair = f"{AGORA_CUSTOMER_ID}:{AGORA_CUSTOMER_SECRET}".encode()
+    token = base64.b64encode(pair).decode()
+    return {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
+
+def get_tts_config():
+    vendor = os.getenv("AGORA_TTS_VENDOR", "microsoft").strip().lower()
+    # supported vendors we handle explicitly
+    supported = {"microsoft", "elevenlabs"}
+    if vendor not in supported:
+        logger.warning(f"AGORA_TTS_VENDOR '{vendor}' not supported in code. Falling back to 'microsoft'.")
+        vendor = "microsoft"
+
+    if vendor == "elevenlabs":
+        # ElevenLabs uses api_key + voice_id + model_id (model usually eleven_flash_v2_5)
+        api_key = os.getenv("AGORA_TTS_API_KEY", "")
+        voice_id = os.getenv("AGORA_TTS_VOICE_ID", "")
+        model_id = os.getenv("AGORA_TTS_MODEL_ID", "eleven_flash_v2_5")
+        return {
+            "vendor": "elevenlabs",
+            "params": {
+                "api_key": api_key,
+                "voice_id": voice_id,
+                "model_id": model_id
+            }
+        }
+    else:
+        # Default: Microsoft Azure Speech (legacy behavior)
+        return {
+            "vendor": "microsoft",
+            "params": {
+                "key": os.getenv("AGORA_TTS_KEY", ""),
+                "region": os.getenv("AGORA_TTS_REGION", "eastus"),
+                "voice_name": os.getenv("AGORA_TTS_VOICE", "en-US-AndrewMultilingualNeural")
+            }
+        }
+
+
+def agora_join(agent_name: str, channel: str, token: Optional[str]) -> Dict[str, Any]:
+    """Debug version: send join and return raw response if non-200 so we can inspect error body."""
+    if not AGORA_APP_ID:
+        raise ValueError("AGORA_APP_ID not set")
+    url = f"https://api.agora.io/api/conversational-ai-agent/v2/projects/{AGORA_APP_ID}/join"
+    headers = agora_basic_auth_header()
+
+    # build payload (same as normal)
+    payload = {
+        "name": agent_name,
+        "properties": {
+            "channel": channel,
+            "token": token or AGORA_TEMP_AGENT_TOKEN,
+            "agent_rtc_uid": "0",
+            "remote_rtc_uids": ["*"],
+            "enable_string_uid": False,
+            "idle_timeout": 120,
+            "llm": {
+                "url": os.getenv("EXTERNAL_LLM_URL", ""),
+                "api_key": os.getenv("EXTERNAL_LLM_API_KEY", ""),
+                "system_messages": [{"role": "system", "content": "You are a helpful chatbot."}],
+                "greeting_message": "Hello, how can I help you?",
+                "failure_message": "Sorry, I don't know how to answer this question.",
+                "max_history": 10,
+                "params": {"model": os.getenv("EXTERNAL_LLM_MODEL", "gpt-4o-mini")}
+            },
+            "asr": {"language": os.getenv("AGORA_ASR_LANGUAGE", "en-US")},
+            "tts": get_tts_config()
+        }
+    }
+
+    # Mask sensitive fields for logs
+    logged = json.loads(json.dumps(payload))
+    try:
+        tparams = logged["properties"]["tts"]["params"]
+        if "api_key" in tparams:
+            tparams["api_key"] = "****REDACTED****"
+        if "key" in tparams:
+            tparams["key"] = "****REDACTED****"
+        if "api_key" in logged["properties"]["llm"]:
+            logged["properties"]["llm"]["api_key"] = "****REDACTED****"
+    except Exception:
+        pass
+
+    logger.info("Agora join payload (masked): %s", json.dumps(logged, indent=2)[:2000])
+
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    # if success return json
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        # return full server response for debugging (don't raise)
+        logger.error("Agora join failed status=%s body=%s", resp.status_code, resp.text)
+        return {"__agora_error_status": resp.status_code, "__agora_error_body": resp.text}
+
+
+
+def agora_leave(agent_id: str) -> Dict[str, Any]:
+    if not AGORA_APP_ID:
+        raise ValueError("AGORA_APP_ID not set")
+    url = f"https://api.agora.io/api/conversational-ai-agent/v2/projects/{AGORA_APP_ID}/agents/{agent_id}/leave"
+    headers = agora_basic_auth_header()
+    resp = requests.post(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
 # ============ API Endpoints ============
 
 @app.get("/")
 def read_root():
     return {
-        "message": "PrepPal API is running with Gemini AI!", 
-        "version": "1.0.0",
-        "gemini_configured": bool(GEMINI_API_KEY)
+        "message": "PrepPal API is running with Gemini AI!",
+        "version": "1.1.0",
+        "gemini_configured": bool(GEMINI_API_KEY),
+        "agora_configured": bool(AGORA_APP_ID and AGORA_CUSTOMER_ID and AGORA_CUSTOMER_SECRET)
     }
+
+
+@app.post("/start-agent")
+def start_agent(payload: Dict = Body(...)):
+    """Start an Agora conversational AI agent. Expects JSON: { channel, agent_token (optional), name (optional) }"""
+    try:
+        channel = payload.get('channel')
+        token = payload.get('agent_token')
+        name = payload.get('name') or f"preppl-{int(time.time())}"
+
+        if not channel:
+            raise HTTPException(status_code=400, detail="channel is required")
+
+        # If no token provided and no AGORA_TEMP_AGENT_TOKEN env var, return error
+        if not (token or AGORA_TEMP_AGENT_TOKEN):
+            raise HTTPException(status_code=400, detail="No agent token provided. Set AGORA_TEMP_AGENT_TOKEN or pass agent_token in request.")
+
+        resp_json = agora_join(name, channel, token)
+        # resp_json should contain agent_id and status
+        return resp_json
+    except HTTPException:
+        raise
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Agora API error: {str(e)} - {e.response.text if e.response is not None else ''}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Start agent failed: {str(e)}")
+
+
+@app.post("/stop-agent")
+def stop_agent(body: Dict = Body(...)):
+    """Stop an Agora conversational AI agent. Expects JSON: { agent_id }
+    """
+    try:
+        agent_id = body.get('agent_id')
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
+
+        resp_json = agora_leave(agent_id)
+        return resp_json
+    except HTTPException:
+        raise
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Agora API error: {str(e)} - {e.response.text if e.response is not None else ''}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stop agent failed: {str(e)}")
+
 
 @app.post("/upload")
 async def upload_document(file: UploadFile = File(...), subject: Optional[str] = None):
     """Upload and process a PDF document"""
     try:
-        # Validate file type
         if not file.filename.endswith('.pdf'):
             raise HTTPException(status_code=400, detail="Only PDF files are supported")
-        
-        # Read file content
         content = await file.read()
-        
-        # Extract text from PDF
         text = extract_text_from_pdf(content)
-        
         if not text:
             raise HTTPException(status_code=400, detail="Could not extract text from PDF. The file may be empty or corrupted.")
-        
-        # Generate unique document ID
         doc_id = str(uuid.uuid4())
-        
-        # Chunk the text
         chunks = chunk_text(text)
-        
-        # Create embeddings using Gemini
         embeddings = create_embeddings(chunks)
-        
-        # Store document
         documents_store[doc_id] = {
             'doc_id': doc_id,
             'filename': file.filename,
@@ -418,7 +530,6 @@ async def upload_document(file: UploadFile = File(...), subject: Optional[str] =
             'upload_date': datetime.now().isoformat(),
             'num_chunks': len(chunks)
         }
-        
         return {
             "doc_id": doc_id,
             "filename": file.filename,
@@ -431,17 +542,13 @@ async def upload_document(file: UploadFile = File(...), subject: Optional[str] =
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     """Handle chat queries with RAG"""
     try:
-        # Retrieve relevant chunks
         relevant_chunks = retrieve_relevant_chunks(request.message, request.doc_ids)
-        
-        # Generate answer using Gemini
         answer = generate_answer_with_llm(request.message, relevant_chunks)
-        
-        # Format sources
         sources = [
             {
                 'filename': chunk['source']['filename'],
@@ -450,8 +557,6 @@ def chat(request: ChatRequest):
             }
             for chunk in relevant_chunks
         ]
-        
-        # Store in chat history
         chat_entry = {
             'timestamp': datetime.now().isoformat(),
             'query': request.message,
@@ -459,7 +564,6 @@ def chat(request: ChatRequest):
             'sources': sources
         }
         chat_history.append(chat_entry)
-        
         return ChatResponse(
             answer=answer,
             sources=sources,
@@ -468,46 +572,39 @@ def chat(request: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
+
 @app.post("/quiz", response_model=QuizResponse)
 def generate_quiz(request: QuizRequest):
     """Generate quiz questions based on documents"""
     try:
-        # Determine topic
         topic = request.topic or "your study materials"
-        
-        # Retrieve relevant context
         context_chunks = []
         if request.doc_ids:
             for doc_id in request.doc_ids:
                 if doc_id in documents_store:
                     doc = documents_store[doc_id]
-                    for i, chunk in enumerate(doc['chunks'][:5]):  # Use first 5 chunks
+                    for i, chunk in enumerate(doc['chunks'][:5]):
                         context_chunks.append({
                             'text': chunk,
                             'source': {'filename': doc['filename'], 'chunk_index': i}
                         })
-        
         if not context_chunks:
             raise HTTPException(status_code=400, detail="No documents found. Please upload documents first.")
-        
-        # Generate quiz questions using Gemini
         questions = generate_quiz_with_llm(topic, context_chunks, request.num_questions)
-        
         return QuizResponse(questions=questions)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Quiz generation failed: {str(e)}")
 
+
 @app.post("/plan", response_model=PlanResponse)
 def create_study_plan(request: PlanRequest):
     """Generate a personalized study plan"""
     try:
         plan = generate_study_plan(request.exam_date, request.hours_per_day, request.subjects)
-        
         total_days = len(plan)
         total_hours = sum(day['hours'] for day in plan)
-        
         return PlanResponse(
             plan=plan,
             total_days=total_days,
@@ -515,6 +612,7 @@ def create_study_plan(request: PlanRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+
 
 @app.get("/documents")
 def list_documents():
@@ -532,6 +630,7 @@ def list_documents():
         ]
     }
 
+
 @app.delete("/documents/{doc_id}")
 def delete_document(doc_id: str):
     """Delete a document"""
@@ -542,15 +641,18 @@ def delete_document(doc_id: str):
     else:
         raise HTTPException(status_code=404, detail="Document not found")
 
+
 @app.get("/health")
 def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
         "gemini_configured": bool(GEMINI_API_KEY),
+        "agora_configured": bool(AGORA_APP_ID and AGORA_CUSTOMER_ID and AGORA_CUSTOMER_SECRET),
         "documents_count": len(documents_store),
         "timestamp": datetime.now().isoformat()
     }
+
 
 if __name__ == "__main__":
     import uvicorn

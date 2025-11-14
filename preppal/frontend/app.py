@@ -605,13 +605,61 @@ with tab3:
     with col1:
         st.markdown(f"#### 💬 {st.session_state.chat_sessions.get(st.session_state.current_chat_id, {}).get('name', 'New Chat')}")
     
-    with col2:
-        # Voice toggle
-        voice_status = "🎤 Voice ON" if st.session_state.voice_enabled else "🔇 Voice OFF"
-        if st.button(voice_status, use_container_width=True):
-            st.session_state.voice_enabled = not st.session_state.voice_enabled
-            if st.session_state.voice_enabled:
-                st.success("🎤 Voice mode enabled!")
+   # ---------- Agora Agent Controls (add inside Chat tab near voice toggle) ----------
+if 'agora_agent' not in st.session_state:
+    st.session_state.agora_agent = {"agent_id": None, "status": None, "channel": None}
+
+st.markdown("### 🔌 Agora Conversational AI (voice agent)")
+col_a, col_b = st.columns([3,2])
+with col_a:
+    channel_name = st.text_input("Agora channel name", value=st.session_state.agora_agent.get("channel") or "preppl_channel")
+with col_b:
+    if st.session_state.voice_enabled:
+        if st.button("🔴 Stop Agora Agent", use_container_width=True):
+            agent_id = st.session_state.agora_agent.get("agent_id")
+            if agent_id:
+                try:
+                    resp = requests.post(f"{API_BASE_URL}/stop-agent", json={"agent_id": agent_id}, timeout=15)
+                    if resp.status_code == 200:
+                        st.session_state.agora_agent = {"agent_id": None, "status": None, "channel": None}
+                        st.success("Agora agent stopped.")
+                    else:
+                        st.error(f"Stop failed: {resp.text}")
+                except Exception as e:
+                    st.error(f"Error stopping agent: {e}")
+            else:
+                st.info("No agent running.")
+    else:
+        if st.button("🟢 Start Agora Agent (voice)", use_container_width=True):
+            # start agent flow
+            try:
+                # pass agent token if you have it; if not pass None and backend must generate/accept temporary token
+                payload = {
+                    "channel": channel_name,
+                    "agent_token": None,   # optional: put token string or leave None
+                    "name": f"preppl-{int(time.time())}"
+                }
+                resp = requests.post(f"{API_BASE_URL}/start-agent", json=payload, timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    st.session_state.agora_agent = {
+                        "agent_id": data.get("agent_id"),
+                        "status": data.get("status"),
+                        "channel": channel_name
+                    }
+                    st.session_state.voice_enabled = True
+                    st.success(f"Agent started: {data.get('agent_id')}")
+                else:
+                    st.error(f"Start failed: {resp.text}")
+            except Exception as e:
+                st.error(f"Error starting agent: {e}")
+
+# show agent status
+if st.session_state.agora_agent.get("agent_id"):
+    st.info(f"Agora Agent: `{st.session_state.agora_agent['agent_id']}` — status: {st.session_state.agora_agent['status']} — channel: {st.session_state.agora_agent['channel']}")
+else:
+    st.write("No Agora agent running.")
+
     
     with col3:
         if st.button("🗑️ Clear Chat", use_container_width=True):
