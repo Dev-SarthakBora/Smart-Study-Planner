@@ -30,7 +30,8 @@ streamlit==1.28.1
 # Note: Full Agora integration requires additional setup
 
 # Optional: Advanced features
-# faiss-cpu==1.7.4  # For efficient vector search
+# faiss-cpu==1.7.4  
+# For efficient vector search
 # sentence-transformers==2.2.2  # For better embeddings
 # gtts==2.4.0  # For text-to-speech fallback
 # SpeechRecognition==3.10.0  # For audio transcription
