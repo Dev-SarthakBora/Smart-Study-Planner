@@ -1,11 +1,37 @@
-fastapi
-uvicorn[standard]
-python-multipart
-google-generativeai
-pandas
-numpy
-pydantic
-PyMuPDF
-python-dotenv
-requests
-streamlit
+# PrepPal Dependencies
+
+# Core Backend
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# LLM & AI
+google-generativeai==0.3.1
+
+# Data Processing
+pandas==2.1.3
+numpy==1.26.2
+pydantic==2.5.0
+
+# PDF Processing
+PyMuPDF==1.23.8
+
+# Environment & Configuration
+python-dotenv==1.0.0
+
+# HTTP Requests
+requests==2.31.0
+
+# Frontend
+streamlit==1.28.1
+
+# Voice (Agora SDK - Optional)
+# agora-token-builder==1.0.0
+# Note: Full Agora integration requires additional setup
+
+# Optional: Advanced features
+# faiss-cpu==1.7.4  
+# For efficient vector search
+# sentence-transformers==2.2.2  # For better embeddings
+# gtts==2.4.0  # For text-to-speech fallback
+# SpeechRecognition==3.10.0  # For audio transcription
