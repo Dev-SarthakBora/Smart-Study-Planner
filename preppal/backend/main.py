@@ -16,7 +16,8 @@ import os
 from dotenv import load_dotenv
 import google.generativeai as genai
 import fitz  # PyMuPDF for PDF processing
-
+import base64
+from pydantic import BaseModel
 # Load environment variables
 load_dotenv()
 
@@ -37,6 +38,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+
+
 
 # ============ In-Memory Storage ============
 documents_store = {}  # {doc_id: {filename, chunks, embeddings, metadata}}

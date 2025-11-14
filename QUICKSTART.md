@@ -300,6 +300,8 @@ pip install --upgrade -r requirements.txt
 
 ---
 
+pip install agora-rtc-sdk agora-rtm-sdk
+
 **Happy Studying! 📚✨**
 
 You're now ready to use PrepPal effectively. Remember: Learn Smarter, Not Harder!

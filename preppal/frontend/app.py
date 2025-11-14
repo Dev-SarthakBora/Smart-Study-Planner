@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import json
 from typing import List, Dict
 import time
+import uuid
 
 # ============ Configuration ============
 API_BASE_URL = "http://localhost:8000"
@@ -22,102 +23,285 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+
+
+
 # ============ Custom CSS ============
 st.markdown("""
 <style>
     /* Main gradient header */
     .main-header {
-        background: linear-gradient(90deg, #00D4FF 0%, #B100FF 50%, #FF00E5 100%);
-        padding: 20px;
-        border-radius: 10px;
-        margin-bottom: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 25px;
+        border-radius: 20px;
+        margin-bottom: 30px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+        text-align: center;
     }
     
     .main-header h1 {
         color: white;
         margin: 0;
-        font-size: 2.5rem;
-        font-weight: bold;
+        font-size: 3rem;
+        font-weight: 800;
+        text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
     }
     
     .main-header p {
         color: white;
-        margin: 5px 0 0 0;
-        font-size: 1rem;
+        margin: 10px 0 0 0;
+        font-size: 1.2rem;
+        opacity: 0.95;
+        font-weight: 500;
     }
     
     /* Navigation tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-        background-color: #f0f0f0;
-        padding: 10px;
-        border-radius: 10px;
+        gap: 4px;
+        background-color: #f8f9fa;
+        padding: 8px;
+        border-radius: 15px;
+        margin-bottom: 25px;
     }
     
     .stTabs [data-baseweb="tab"] {
         background-color: white;
-        border: 2px solid black;
-        border-radius: 8px;
-        padding: 10px 20px;
-        font-weight: bold;
+        border-radius: 12px;
+        padding: 15px 25px;
+        font-weight: 600;
+        margin: 0 2px;
+        transition: all 0.3s ease;
+        border: 2px solid transparent;
+        color: #6c757d;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e9ecef;
+        color: #495057;
+        transform: translateY(-2px);
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        border-color: #5a67d8 !important;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
     }
     
     /* Chat messages */
     .user-message {
-        background-color: #FFE600;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        border: 2px solid black;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 18px 20px;
+        border-radius: 20px 20px 5px 20px;
+        margin: 15px 0;
+        color: white;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
+        max-width: 85%;
+        margin-left: auto;
     }
     
     .bot-message {
-        background-color: #00D4FF;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        border: 2px solid black;
+        background: white;
+        padding: 18px 20px;
+        border-radius: 20px 20px 20px 5px;
+        margin: 15px 0;
+        border: 2px solid #e9ecef;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        max-width: 85%;
+    }
+    
+    .message-time {
+        font-size: 0.75rem;
+        opacity: 0.7;
+        margin-top: 8px;
+    }
+    
+    .sources-badge {
+        background: linear-gradient(135deg, #ffd89b 0%, #19547b 100%);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 15px;
+        font-size: 0.75rem;
+        margin-top: 10px;
+        display: inline-block;
     }
     
     /* Buttons */
     .stButton>button {
-        background-color: #FFE600;
-        color: black;
-        border: 2px solid black;
-        border-radius: 8px;
-        font-weight: bold;
-        padding: 10px 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-weight: 600;
+        padding: 12px 24px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
     }
     
     .stButton>button:hover {
-        background-color: #FF00E5;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
         color: white;
+    }
+    
+    /* Primary action buttons */
+    .primary-button {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%) !important;
+    }
+    
+    .primary-button:hover {
+        background: linear-gradient(135deg, #ee5a52 0%, #ff6b6b 100%) !important;
     }
     
     /* Progress bar */
     .stProgress > div > div > div {
-        background-color: #FFE600;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
     }
     
     /* Info boxes */
     .info-box {
-        background-color: #FFE600;
-        padding: 20px;
-        border-radius: 10px;
-        border: 3px solid black;
-        margin: 10px 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 25px;
+        border-radius: 20px;
+        color: white;
+        margin: 15px 0;
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.2);
     }
     
-    .info-box h3 {
+    .info-box h2 {
         margin: 0 0 10px 0;
-        color: black;
+        font-weight: 700;
+    }
+    
+    /* Dashboard cards */
+    .dashboard-card {
+        background: white;
+        padding: 25px;
+        border-radius: 20px;
+        border: none;
+        margin: 10px 0;
+        transition: all 0.3s ease;
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+        text-align: center;
+    }
+    
+    .dashboard-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+    }
+    
+    /* Scrollable chat container */
+    .chat-container {
+        height: 500px;
+        overflow-y: auto;
+        padding: 20px;
+        border-radius: 20px;
+        background: #f8f9fa;
+        margin-bottom: 20px;
+        border: 2px solid #e9ecef;
+    }
+    
+    /* Chat session buttons */
+    .chat-session {
+        padding: 15px;
+        margin: 8px 0;
+        border-radius: 15px;
+        border: 2px solid #e9ecef;
+        background: white;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-align: left;
+    }
+    
+    .chat-session:hover {
+        border-color: #667eea;
+        background: #f0f4ff;
+        transform: translateX(5px);
+    }
+    
+    .chat-session.active {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-color: #5a67d8;
+    }
+    
+    /* Input fields */
+    .stTextInput>div>div>input {
+        border-radius: 12px;
+        border: 2px solid #e9ecef;
+        padding: 12px 16px;
+        font-size: 1rem;
+    }
+    
+    .stTextInput>div>div>input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+    }
+    
+    /* File uploader */
+    .stFileUploader>div>div {
+        border: 2px dashed #667eea;
+        border-radius: 15px;
+        background: #f8f9fa;
+    }
+    
+    /* Sidebar */
+    .css-1d391kg {
+        background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
+    }
+    
+    /* Dark theme support */
+    @media (prefers-color-scheme: dark) {
+        .dashboard-card {
+            background: #2d3748;
+            color: white;
+        }
+        
+        .chat-container {
+            background: #2d3748;
+            border-color: #4a5568;
+        }
+        
+        .chat-session {
+            background: #2d3748;
+            border-color: #4a5568;
+            color: white;
+        }
+        
+        .bot-message {
+            background: #4a5568;
+            color: white;
+            border-color: #718096;
+        }
+    }
+    
+    /* Scrollbar styling */
+    .chat-container::-webkit-scrollbar {
+        width: 8px;
+    }
+    
+    .chat-container::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 10px;
+    }
+    
+    .chat-container::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 10px;
+    }
+    
+    .chat-container::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ============ Session State Initialization ============
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+if 'chat_sessions' not in st.session_state:
+    st.session_state.chat_sessions = {}
+if 'current_chat_id' not in st.session_state:
+    st.session_state.current_chat_id = None
 if 'uploaded_docs' not in st.session_state:
     st.session_state.uploaded_docs = []
 if 'current_plan' not in st.session_state:
@@ -129,11 +313,23 @@ if 'quiz_answers' not in st.session_state:
 if 'voice_enabled' not in st.session_state:
     st.session_state.voice_enabled = False
 
+def create_new_chat():
+    """Create a new chat session"""
+    chat_id = str(uuid.uuid4())[:8]
+    st.session_state.chat_sessions[chat_id] = {
+        'name': f"Chat {len(st.session_state.chat_sessions) + 1}",
+        'history': [],
+        'created_at': datetime.now().strftime("%H:%M"),
+        'documents': []
+    }
+    st.session_state.current_chat_id = chat_id
+    return chat_id
+
 # ============ Header ============
 st.markdown("""
 <div class="main-header">
     <h1>⚡ PrepPal</h1>
-    <p>YOUR SMART STUDY PARTNER</p>
+    <p>YOUR SMART STUDY PARTNER - Learn Smarter, Not Harder</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -148,99 +344,151 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 # ============ TAB 1: Dashboard ============
 with tab1:
-    st.markdown("## Welcome Back! 👋")
-    st.markdown("Ready to crush your study goals? Let's make learning awesome!")
+    st.markdown("## 🎯 Quick Access Dashboard")
+    st.markdown("Everything you need to ace your studies in one place!")
     
-    # Quick stats
+    # Quick stats in cards
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown("""
-        <div class="info-box" style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%);">
-            <h3>📚 Documents</h3>
-            <h1 style="margin:0; font-size: 3rem;">{}</h1>
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <h3 style="color: #667eea; margin: 0 0 15px 0; font-size: 2.5rem;">📚</h3>
+            <h4 style="margin: 0 0 10px 0; color: inherit;">Documents</h4>
+            <h1 style="margin: 10px 0; color: inherit; font-size: 2.2rem;">{len(st.session_state.uploaded_docs)}</h1>
+            <p style="margin: 0; color: #666; font-size: 0.9rem;">Uploaded files</p>
         </div>
-        """.format(len(st.session_state.uploaded_docs)), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     with col2:
-        st.markdown("""
-        <div class="info-box" style="background: linear-gradient(135deg, #FF00E5 0%, #CC00B8 100%);">
-            <h3>💬 Chat Sessions</h3>
-            <h1 style="margin:0; font-size: 3rem;">{}</h1>
+        total_chats = sum(len(session['history']) for session in st.session_state.chat_sessions.values())
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <h3 style="color: #764ba2; margin: 0 0 15px 0; font-size: 2.5rem;">💬</h3>
+            <h4 style="margin: 0 0 10px 0; color: inherit;">Chat Sessions</h4>
+            <h1 style="margin: 10px 0; color: inherit; font-size: 2.2rem;">{len(st.session_state.chat_sessions)}</h1>
+            <p style="margin: 0; color: #666; font-size: 0.9rem;">Active conversations</p>
         </div>
-        """.format(len(st.session_state.chat_history)), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     with col3:
-        st.markdown("""
-        <div class="info-box" style="background: linear-gradient(135deg, #FFE600 0%, #CCB800 100%);">
-            <h3>📅 Study Plans</h3>
-            <h1 style="margin:0; font-size: 3rem;">{}</h1>
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <h3 style="color: #ff6b6b; margin: 0 0 15px 0; font-size: 2.5rem;">📅</h3>
+            <h4 style="margin: 0 0 10px 0; color: inherit;">Study Plans</h4>
+            <h1 style="margin: 10px 0; color: inherit; font-size: 2.2rem;">{1 if st.session_state.current_plan else 0}</h1>
+            <p style="margin: 0; color: #666; font-size: 0.9rem;">Active plans</p>
         </div>
-        """.format(1 if st.session_state.current_plan else 0), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     with col4:
-        st.markdown("""
-        <div class="info-box" style="background: linear-gradient(135deg, #00FF88 0%, #00CC6E 100%);">
-            <h3>🧠 Quizzes Taken</h3>
-            <h1 style="margin:0; font-size: 3rem;">{}</h1>
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <h3 style="color: #00d4ff; margin: 0 0 15px 0; font-size: 2.5rem;">🧠</h3>
+            <h4 style="margin: 0 0 10px 0; color: inherit;">Quizzes</h4>
+            <h1 style="margin: 10px 0; color: inherit; font-size: 2.2rem;">{len(st.session_state.quiz_answers)}</h1>
+            <p style="margin: 0; color: #666; font-size: 0.9rem;">Completed</p>
         </div>
-        """.format(len(st.session_state.quiz_answers)), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Quick Actions
+    # Quick Actions in a grid layout
     st.markdown("## ⚡ Quick Actions")
     
-    action_col1, action_col2 = st.columns(2)
+    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
     
     with action_col1:
-        if st.button("📤 Upload Document", use_container_width=True):
-            st.switch_page
-        
-        if st.button("📅 Create Study Plan", use_container_width=True):
-            st.switch_page
+        if st.button("📤 Upload Document", use_container_width=True, key="dash_upload"):
+            st.switch_page("pages/documents.py")
     
     with action_col2:
-        if st.button("💬 Ask PrepPal", use_container_width=True):
-            st.switch_page
+        if st.button("📅 Create Study Plan", use_container_width=True, key="dash_plan"):
+            st.switch_page("pages/study_plans.py")
+    
+    with action_col3:
+        if st.button("💬 New Chat", use_container_width=True, key="dash_chat"):
+            create_new_chat()
+            st.switch_page("pages/chat.py")
+    
+    with action_col4:
+        if st.button("🧠 Generate Quiz", use_container_width=True, key="dash_quiz"):
+            st.switch_page("pages/quizzes.py")
+    
+    # Recent Activity Section
+    st.markdown("---")
+    st.markdown("## 📈 Recent Activity")
+    
+    if st.session_state.uploaded_docs or st.session_state.chat_sessions:
+        col1, col2 = st.columns(2)
         
-        if st.button("🧠 Take Quiz", use_container_width=True):
-            st.switch_page
+        with col1:
+            st.markdown("### 📚 Recent Documents")
+            if st.session_state.uploaded_docs:
+                for doc in list(st.session_state.uploaded_docs)[-3:]:
+                    st.markdown(f"""
+                    <div class="dashboard-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: 600;">{doc['filename']}</span>
+                            <span style="font-size: 0.8rem; color: #666;">{doc['subject']}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("No documents uploaded yet")
+        
+        with col2:
+            st.markdown("### 💬 Recent Chats")
+            if st.session_state.chat_sessions:
+                for chat_id, session in list(st.session_state.chat_sessions.items())[-3:]:
+                    last_msg = session['history'][-1]['query'][:50] + "..." if session['history'] else "No messages yet"
+                    st.markdown(f"""
+                    <div class="dashboard-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: 600;">{session['name']}</span>
+                            <span style="font-size: 0.8rem; color: #666;">{session['created_at']}</span>
+                        </div>
+                        <p style="margin: 5px 0 0 0; font-size: 0.9rem; color: #666;">{last_msg}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("No chat sessions yet")
+    else:
+        st.info("🎯 Get started by uploading documents or starting a chat!")
 
 # ============ TAB 2: Documents ============
 with tab2:
     st.markdown("""
-    <div class="info-box" style="background: linear-gradient(135deg, #00D4FF 0%, #00A8CC 100%);">
-        <h2 style="color: white; margin: 0;">📚 STUDY MATERIALS</h2>
-        <p style="color: white; margin: 5px 0 0 0;">Upload your notes and PDFs here</p>
+    <div class="info-box">
+        <h2>📚 STUDY MATERIALS</h2>
+        <p style="margin: 5px 0 0 0; opacity: 0.9;">Upload your notes and PDFs to build your knowledge base</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Upload section
-    st.markdown("### 📤 UPLOAD NEW DOCUMENT")
+    # Upload section with enhanced UI
+    st.markdown("### 📤 Upload New Document")
     
-    uploaded_file = st.file_uploader(
-        "Choose a PDF file",
-        type=['pdf'],
-        help="PDF files only"
-    )
+    with st.container():
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            uploaded_file = st.file_uploader(
+                "Choose a PDF file",
+                type=['pdf'],
+                help="Upload your study materials in PDF format",
+                label_visibility="collapsed"
+            )
+        
+        with col2:
+            doc_subject = st.text_input(
+                "Subject/Topic",
+                placeholder="e.g., Physics, Mathematics...",
+                label_visibility="collapsed"
+            )
     
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        doc_subject = st.text_input(
-            "Subject (Optional)",
-            placeholder="e.g., Physics, Mathematics, Biology"
-        )
-    
-    with col2:
-        st.write("")  # Spacing
-        st.write("")  # Spacing
-        upload_button = st.button("📤 UPLOAD & PROCESS", use_container_width=True)
-    
-    if upload_button and uploaded_file:
-        with st.spinner("Processing your document..."):
+    if st.button("🚀 UPLOAD & PROCESS", use_container_width=True, type="primary") and uploaded_file:
+        with st.spinner("🔄 Processing your document..."):
             try:
-                # Upload to backend
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
                 data = {"subject": doc_subject} if doc_subject else {}
                 
@@ -253,200 +501,306 @@ with tab2:
                 if response.status_code == 200:
                     result = response.json()
                     st.session_state.uploaded_docs.append(result)
-                    st.success(f"✅ {result['filename']} uploaded successfully! Processed {result['num_chunks']} chunks.")
+                    st.success(f"✅ **{result['filename']}** uploaded successfully! Processed {result['num_chunks']} knowledge chunks.")
                 else:
-                    st.error(f"Upload failed: {response.text}")
+                    st.error(f"❌ Upload failed: {response.text}")
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"❌ Error: {str(e)}")
     
     st.markdown("---")
     
-    # Documents list
-    st.markdown("### 📑 YOUR DOCUMENTS")
+    # Documents grid view
+    st.markdown("### 📑 Your Document Library")
     
     if st.session_state.uploaded_docs:
-        for doc in st.session_state.uploaded_docs:
-            with st.container():
-                col1, col2, col3 = st.columns([3, 1, 1])
-                
-                with col1:
+        # Grid layout for documents
+        cols = st.columns(3)
+        for i, doc in enumerate(st.session_state.uploaded_docs):
+            with cols[i % 3]:
+                with st.container():
                     st.markdown(f"""
-                    <div style="background: white; padding: 15px; border: 2px solid black; border-radius: 8px;">
-                        <h4 style="margin: 0;">📄 {doc['filename']}</h4>
-                        <p style="margin: 5px 0 0 0; color: #666;">{doc['subject']} • {doc['num_chunks']} pages</p>
+                    <div class="dashboard-card">
+                        <div style="text-align: center;">
+                            <h3 style="margin: 0 0 10px 0; color: #667eea; font-size: 2rem;">📄</h3>
+                            <h4 style="margin: 0 0 8px 0; font-size: 1rem;">{doc['filename'][:20]}{'...' if len(doc['filename']) > 20 else ''}</h4>
+                            <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #666;">{doc['subject']}</p>
+                            <p style="margin: 0; font-size: 0.8rem; color: #999;">{doc['num_chunks']} chunks</p>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
-                
-                with col2:
-                    if st.button("👁️ VIEW", key=f"view_{doc['doc_id']}"):
-                        st.info("Document viewer coming soon!")
-                
-                with col3:
-                    if st.button("🗑️ DELETE", key=f"delete_{doc['doc_id']}"):
-                        try:
-                            response = requests.delete(f"{API_BASE_URL}/documents/{doc['doc_id']}")
-                            if response.status_code == 200:
-                                st.session_state.uploaded_docs = [
-                                    d for d in st.session_state.uploaded_docs 
-                                    if d['doc_id'] != doc['doc_id']
-                                ]
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Delete failed: {str(e)}")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("👁️ View", key=f"view_{doc['doc_id']}", use_container_width=True):
+                            st.info("🔍 Document viewer coming soon!")
+                    with col2:
+                        if st.button("🗑️", key=f"delete_{doc['doc_id']}", use_container_width=True):
+                            try:
+                                response = requests.delete(f"{API_BASE_URL}/documents/{doc['doc_id']}")
+                                if response.status_code == 200:
+                                    st.session_state.uploaded_docs = [
+                                        d for d in st.session_state.uploaded_docs 
+                                        if d['doc_id'] != doc['doc_id']
+                                    ]
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Delete failed: {str(e)}")
     else:
-        st.info("📭 No documents uploaded yet. Upload your first study material above!")
+        st.info("""
+        📭 **No documents uploaded yet!**
+        
+        Get started by:
+        1. Uploading your PDF notes above
+        2. Adding relevant subjects/topics
+        3. Building your personal knowledge base
+        """)
 
-# ============ TAB 3: Chat ============
+# ============ TAB 3: Chat (IMPROVED) ============
 with tab3:
     st.markdown("""
-    <div class="info-box" style="background: linear-gradient(135deg, #FF00E5 0%, #CC00B8 100%);">
-        <h2 style="color: white; margin: 0;">💬 ASK PREPPAL</h2>
-        <p style="color: white; margin: 5px 0 0 0;">Your AI study buddy is here to help!</p>
+    <div class="info-box">
+        <h2>💬 SMART CHAT</h2>
+        <p style="margin: 5px 0 0 0; opacity: 0.9;">Chat with your AI study assistant about your materials</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Voice toggle
-    col1, col2 = st.columns([5, 1])
-    with col2:
-        if st.button("🎤" if not st.session_state.voice_enabled else "🔇"):
-            st.session_state.voice_enabled = not st.session_state.voice_enabled
-            if st.session_state.voice_enabled:
-                st.info("🎤 Voice mode enabled! (Integration with Agora SDK required)")
+    # Initialize current chat if none exists
+    if not st.session_state.current_chat_id and not st.session_state.chat_sessions:
+        create_new_chat()
     
-    # Document selector
-    st.markdown("### Chat with:")
-    if st.session_state.uploaded_docs:
-        doc_options = ["All Documents"] + [doc['filename'] for doc in st.session_state.uploaded_docs]
-        selected_doc = st.selectbox("Select document", doc_options, label_visibility="collapsed")
-    else:
-        st.warning("⚠️ No documents uploaded. Upload documents to chat with your study materials!")
-        selected_doc = None
+    # Chat sidebar for session management
+    with st.sidebar:
+        st.markdown("### 💭 Chat Sessions")
+        
+        # New chat button
+        if st.button("🆕 New Chat Session", use_container_width=True, type="primary"):
+            create_new_chat()
+            st.rerun()
+        
+        st.markdown("---")
+        
+        # Chat sessions list
+        for chat_id, session in st.session_state.chat_sessions.items():
+            is_active = chat_id == st.session_state.current_chat_id
+            
+            if st.button(
+                f"💬 {session['name']} • {session['created_at']}",
+                key=f"chat_btn_{chat_id}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary"
+            ):
+                st.session_state.current_chat_id = chat_id
+                st.rerun()
+        
+        st.markdown("---")
+        st.markdown("### 📊 Chat Stats")
+        current_chat = st.session_state.chat_sessions.get(st.session_state.current_chat_id, {})
+        messages_count = len(current_chat.get('history', []))
+        st.write(f"**Messages:** {messages_count}")
+        st.write(f"**Documents:** {len(st.session_state.uploaded_docs)}")
     
-    # Chat history display
-    st.markdown("### 💬 Conversation")
-    chat_container = st.container()
-    
-    with chat_container:
-        if not st.session_state.chat_history:
-            st.markdown("""
-            <div class="bot-message">
-                <p style="margin: 0;"><strong>🤖 PrepPal:</strong></p>
-                <p style="margin: 5px 0 0 0;">Hi there! It seems I don't have any study materials to reference at the moment. However, I'm here to help with any questions you might have! What would you like to know?</p>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            for msg in st.session_state.chat_history:
-                # User message
-                st.markdown(f"""
-                <div class="user-message">
-                    <p style="margin: 0;"><strong>👤 You:</strong></p>
-                    <p style="margin: 5px 0 0 0;">{msg['query']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Bot message
-                sources_text = ""
-                if msg.get('sources'):
-                    sources_text = "<br><small>📚 Sources: " + ", ".join([
-                        f"{s['filename']} (chunk {s['chunk_index']})" 
-                        for s in msg['sources'][:3]
-                    ]) + "</small>"
-                
-                st.markdown(f"""
-                <div class="bot-message">
-                    <p style="margin: 0;"><strong>🤖 PrepPal:</strong></p>
-                    <p style="margin: 5px 0 0 0;">{msg['answer']}</p>
-                    {sources_text}
-                </div>
-                """, unsafe_allow_html=True)
-    
-    # Chat input
-    st.markdown("---")
-    col1, col2 = st.columns([5, 1])
+    # Main chat area
+    col1, col2, col3 = st.columns([3, 1, 1])
     
     with col1:
-        user_query = st.text_input(
-            "Type your question here...",
-            placeholder="Ask anything about your study materials...",
-            label_visibility="collapsed",
-            key="chat_input"
-        )
+        st.markdown(f"#### 💬 {st.session_state.chat_sessions.get(st.session_state.current_chat_id, {}).get('name', 'New Chat')}")
     
     with col2:
-        send_button = st.button("📤 Send", use_container_width=True)
+        # Voice toggle
+        voice_status = "🎤 Voice ON" if st.session_state.voice_enabled else "🔇 Voice OFF"
+        if st.button(voice_status, use_container_width=True):
+            st.session_state.voice_enabled = not st.session_state.voice_enabled
+            if st.session_state.voice_enabled:
+                st.success("🎤 Voice mode enabled!")
     
-    if send_button and user_query:
-        with st.spinner("🤔 Thinking..."):
-            try:
-                # Prepare request
-                doc_ids = None
-                if selected_doc and selected_doc != "All Documents":
-                    doc_ids = [
-                        doc['doc_id'] for doc in st.session_state.uploaded_docs 
-                        if doc['filename'] == selected_doc
-                    ]
-                
-                # Send to backend
-                response = requests.post(
-                    f"{API_BASE_URL}/chat",
-                    json={
-                        "user_id": "default_user",
-                        "message": user_query,
-                        "doc_ids": doc_ids
-                    }
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    st.session_state.chat_history.append({
-                        'query': user_query,
-                        'answer': result['answer'],
-                        'sources': result['sources'],
-                        'timestamp': result['timestamp']
-                    })
-                    st.rerun()
-                else:
-                    st.error(f"Chat failed: {response.text}")
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+    with col3:
+        if st.button("🗑️ Clear Chat", use_container_width=True):
+            if st.session_state.current_chat_id in st.session_state.chat_sessions:
+                st.session_state.chat_sessions[st.session_state.current_chat_id]['history'] = []
+                st.rerun()
+    
+    # Document selector with improved UI
+    if st.session_state.uploaded_docs:
+        doc_options = ["All Documents"] + [doc['filename'] for doc in st.session_state.uploaded_docs]
+        selected_doc = st.selectbox(
+            "📚 Chat with specific document:",
+            doc_options, 
+            help="Choose which documents to reference in this chat"
+        )
+    else:
+        selected_doc = None
+        st.warning("⚠️ Upload documents to enable smart chat with your materials!")
+    
+    # Enhanced chat container with better styling
+    current_chat = st.session_state.chat_sessions.get(st.session_state.current_chat_id, {})
+    chat_history = current_chat.get('history', [])
+    
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+    
+    if not chat_history:
+        st.markdown("""
+        <div class="bot-message">
+            <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 10px;">
+                    <span style="color: white; font-size: 0.8rem;">AI</span>
+                </div>
+                <strong>PrepPal Assistant</strong>
+            </div>
+            <p style="margin: 0; line-height: 1.5;">Hello! I'm your AI study assistant. I can help you:</p>
+            <ul style="margin: 10px 0 0 0; padding-left: 20px; line-height: 1.5;">
+                <li>Answer questions about your uploaded materials</li>
+                <li>Explain complex concepts in simple terms</li>
+                <li>Generate study plans and summaries</li>
+                <li>Create quiz questions to test your knowledge</li>
+            </ul>
+            <p style="margin: 10px 0 0 0; line-height: 1.5;">What would you like to learn today?</p>
+            <div class="message-time">Just now</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        for msg in chat_history:
+            # User message
+            st.markdown(f"""
+            <div class="user-message">
+                <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                    <div style="width: 32px; height: 32px; background: rgba(255, 255, 255, 0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 10px;">
+                        <span style="color: white; font-size: 0.8rem;">You</span>
+                    </div>
+                    <strong>You</strong>
+                </div>
+                <p style="margin: 0; line-height: 1.5;">{msg['query']}</p>
+                <div class="message-time">{msg.get('timestamp', 'Recently')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Bot message
+            sources_text = ""
+            if msg.get('sources'):
+                sources_text = f"""
+                <div class="sources-badge">
+                    📚 Sources: {len(msg['sources'])} document{'' if len(msg['sources']) == 1 else 's'}
+                </div>
+                """
+            
+            st.markdown(f"""
+            <div class="bot-message">
+                <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                    <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 10px;">
+                        <span style="color: white; font-size: 0.8rem;">AI</span>
+                    </div>
+                    <strong>PrepPal</strong>
+                </div>
+                <p style="margin: 0; line-height: 1.5;">{msg['answer']}</p>
+                {sources_text}
+                <div class="message-time">{msg.get('timestamp', 'Recently')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Enhanced chat input with quick actions
+    st.markdown("#### 💭 Your Message")
+    
+    # Quick action buttons
+
+    
+    # Chat input
+    user_query = st.text_area(
+        "Type your message here...",
+        placeholder="Ask anything about your study materials, request explanations, or ask for examples...",
+        height=100,
+        key="chat_input",
+        label_visibility="collapsed"
+    )
+    
+    col1, col2 = st.columns([4, 1])
+    
+    with col1:
+        if st.button("🚀 Send Message", use_container_width=True, type="primary") and user_query:
+            with st.spinner("🤔 Thinking..."):
+                try:
+                    # Prepare request
+                    doc_ids = None
+                    if selected_doc and selected_doc != "All Documents":
+                        doc_ids = [
+                            doc['doc_id'] for doc in st.session_state.uploaded_docs 
+                            if doc['filename'] == selected_doc
+                        ]
+                    
+                    # Send to backend
+                    response = requests.post(
+                        f"{API_BASE_URL}/chat",
+                        json={
+                            "user_id": "default_user",
+                            "message": user_query,
+                            "doc_ids": doc_ids
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        
+                        # Update current chat history
+                        if st.session_state.current_chat_id in st.session_state.chat_sessions:
+                            st.session_state.chat_sessions[st.session_state.current_chat_id]['history'].append({
+                                'query': user_query,
+                                'answer': result['answer'],
+                                'sources': result['sources'],
+                                'timestamp': result['timestamp']
+                            })
+                        
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Chat failed: {response.text}")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+    
+    with col2:
+        if st.button("🔄 Clear", use_container_width=True):
+            st.session_state.chat_input = ""
+            st.rerun()
 
 # ============ TAB 4: Study Plans ============
 with tab4:
     st.markdown("""
-    <div class="info-box" style="background: linear-gradient(135deg, #FFE600 0%, #CCB800 100%);">
-        <h2 style="color: black; margin: 0;">📅 STUDY PLANS</h2>
-        <p style="color: black; margin: 5px 0 0 0;">Let AI organize your study schedule</p>
+    <div class="info-box">
+        <h2>📅 STUDY PLANS</h2>
+        <p style="margin: 5px 0 0 0; opacity: 0.9;">AI-powered personalized study schedules</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Plan creation form
-    st.markdown("### ➕ CREATE NEW PLAN")
+    st.markdown("### 🎯 Create New Study Plan")
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        exam_date = st.date_input(
-            "📆 Exam Date",
-            min_value=datetime.now().date(),
-            value=datetime.now().date() + timedelta(days=30)
-        )
+    with st.container():
+        col1, col2 = st.columns(2)
         
-        hours_per_day = st.slider(
-            "⏰ Study Hours per Day",
-            min_value=1.0,
-            max_value=12.0,
-            value=4.0,
-            step=0.5
-        )
+        with col1:
+            exam_date = st.date_input(
+                "📆 Exam Date",
+                min_value=datetime.now().date(),
+                value=datetime.now().date() + timedelta(days=30),
+                help="When is your exam?"
+            )
+            
+            hours_per_day = st.slider(
+                "⏰ Study Hours per Day",
+                min_value=1.0,
+                max_value=12.0,
+                value=4.0,
+                step=0.5,
+                help="How many hours can you study daily?"
+            )
+        
+        with col2:
+            subjects_input = st.text_area(
+                "📚 Subjects & Topics",
+                placeholder="Mathematics - Algebra, Calculus\nPhysics - Mechanics, Optics\nChemistry - Organic, Inorganic",
+                height=120,
+                help="Enter subjects and specific topics (one per line)"
+            )
     
-    with col2:
-        subjects_input = st.text_area(
-            "📚 Subjects (one per line)",
-            placeholder="Mathematics\nPhysics\nChemistry\nBiology",
-            height=120
-        )
-    
-    if st.button("🎯 GENERATE PLAN", use_container_width=True):
+    if st.button("🚀 GENERATE SMART PLAN", use_container_width=True, type="primary"):
         subjects = [s.strip() for s in subjects_input.split('\n') if s.strip()]
         
         if not subjects:
@@ -466,17 +820,17 @@ with tab4:
                     if response.status_code == 200:
                         result = response.json()
                         st.session_state.current_plan = result
-                        st.success(f"✅ Study plan created! {result['total_days']} days, {result['total_hours']} total hours.")
+                        st.success(f"✅ Study plan created! **{result['total_days']} days**, **{result['total_hours']} total hours** of focused study.")
                         st.rerun()
                     else:
-                        st.error(f"Plan creation failed: {response.text}")
+                        st.error(f"❌ Plan creation failed: {response.text}")
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                    st.error(f"❌ Error: {str(e)}")
     
     st.markdown("---")
     
     # Display current plan
-    st.markdown("### 📋 YOUR PLAN")
+    st.markdown("### 📋 Your Study Plan")
     
     if st.session_state.current_plan:
         plan_data = st.session_state.current_plan['plan']
@@ -486,47 +840,82 @@ with tab4:
         completed_days = sum(1 for day in plan_data if day.get('completed', False))
         progress = completed_days / total_days if total_days > 0 else 0
         
-        st.markdown(f"**Progress:** {completed_days}/{total_days} days completed")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Days", total_days)
+        with col2:
+            st.metric("Completed Days", completed_days)
+        with col3:
+            st.metric("Progress", f"{progress:.1%}")
+        
         st.progress(progress)
         
-        # Plan table
-        df = pd.DataFrame(plan_data)
-        df_display = df[['day', 'date', 'subject', 'hours', 'topics']]
-        df_display.columns = ['Day', 'Date', 'Subject', 'Hours', 'Topics']
+        # Interactive plan table
+        st.markdown("#### 📅 Daily Schedule")
+        for i, day in enumerate(plan_data):
+            with st.expander(f"Day {day['day']}: {day['date']} - {day['subject']} ({day['hours']} hours)"):
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"**Topics:** {day['topics']}")
+                with col2:
+                    completed = st.checkbox(
+                        "Completed", 
+                        value=day.get('completed', False),
+                        key=f"day_{i}_completed"
+                    )
+                    if completed != day.get('completed', False):
+                        plan_data[i]['completed'] = completed
+                        st.rerun()
         
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
-        
-        # Actions
-        if st.button("🗑️ Clear Plan"):
-            st.session_state.current_plan = None
-            st.rerun()
+        # Plan actions
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Update Progress", use_container_width=True):
+                st.success("Progress updated!")
+        with col2:
+            if st.button("🗑️ Clear Plan", use_container_width=True):
+                st.session_state.current_plan = None
+                st.rerun()
     else:
-        st.info("📭 No study plan yet. Create your first personalized schedule above!")
+        st.info("""
+        📭 **No study plan yet!**
+        
+        Create your first AI-powered study plan:
+        1. Set your exam date
+        2. Choose daily study hours  
+        3. List your subjects & topics
+        4. Generate personalized schedule
+        """)
 
 # ============ TAB 5: Quizzes ============
 with tab5:
     st.markdown("""
-    <div class="info-box" style="background: linear-gradient(135deg, #00FF88 0%, #00CC6E 100%);">
-        <h2 style="color: black; margin: 0;">🧠 QUIZ TIME!</h2>
-        <p style="color: black; margin: 5px 0 0 0;">Test your knowledge with AI-generated questions</p>
+    <div class="info-box">
+        <h2>🧠 QUIZ MASTER</h2>
+        <p style="margin: 5px 0 0 0; opacity: 0.9;">Test your knowledge with AI-generated quizzes</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Quiz generation
-    st.markdown("### ➕ CREATE NEW QUIZ")
+    st.markdown("### 🎲 Create New Quiz")
     
-    col1, col2 = st.columns([3, 1])
+    with st.container():
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            quiz_topic = st.text_input(
+                "Quiz Topic",
+                placeholder="e.g., Photosynthesis, Newton's Laws, Algebra",
+                help="Specific topic or leave blank for general quiz"
+            )
+        
+        with col2:
+            num_questions = st.selectbox("Questions", [3, 5, 10, 15], index=1)
+        
+        with col3:
+            difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard"], index=1)
     
-    with col1:
-        quiz_topic = st.text_input(
-            "Topic (Optional)",
-            placeholder="e.g., Photosynthesis, Newton's Laws, Algebra"
-        )
-    
-    with col2:
-        num_questions = st.selectbox("Questions", [3, 5, 10], index=1)
-    
-    if st.button("🎲 GENERATE QUIZ", use_container_width=True):
+    if st.button("🚀 GENERATE QUIZ", use_container_width=True, type="primary"):
         with st.spinner("🤖 Generating quiz questions..."):
             try:
                 doc_ids = [doc['doc_id'] for doc in st.session_state.uploaded_docs]
@@ -536,7 +925,8 @@ with tab5:
                     json={
                         "topic": quiz_topic or None,
                         "doc_ids": doc_ids if doc_ids else None,
-                        "num_questions": num_questions
+                        "num_questions": num_questions,
+                        "difficulty": difficulty
                     }
                 )
                 
@@ -544,74 +934,108 @@ with tab5:
                     result = response.json()
                     st.session_state.quiz_questions = result['questions']
                     st.session_state.quiz_answers = {}
-                    st.success(f"✅ Quiz generated with {len(result['questions'])} questions!")
+                    st.success(f"✅ Quiz generated with **{len(result['questions'])} {difficulty.lower()}** questions!")
                     st.rerun()
                 else:
-                    st.error(f"Quiz generation failed: {response.text}")
+                    st.error(f"❌ Quiz generation failed: {response.text}")
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"❌ Error: {str(e)}")
     
     st.markdown("---")
     
     # Display quiz
     if st.session_state.quiz_questions:
-        st.markdown("### 📝 YOUR QUIZ")
+        st.markdown("### 📝 Your Quiz")
         
         for i, question in enumerate(st.session_state.quiz_questions):
-            st.markdown(f"**Question {i+1}:** {question['question']}")
-            
-            answer = st.radio(
-                f"Select your answer:",
-                options=question['options'],
-                key=f"q_{i}",
-                label_visibility="collapsed"
-            )
-            
-            st.session_state.quiz_answers[i] = question['options'].index(answer)
-            
-            st.markdown("---")
+            with st.container():
+                st.markdown(f"#### ❓ Question {i+1}")
+                st.markdown(f"**{question['question']}**")
+                
+                # Enhanced options with better styling
+                options = question['options']
+                selected_option = st.radio(
+                    f"Select your answer for question {i+1}:",
+                    options=options,
+                    key=f"q_{i}",
+                    label_visibility="collapsed"
+                )
+                
+                st.session_state.quiz_answers[i] = options.index(selected_option)
+                
+                st.markdown("---")
         
         # Submit quiz
-        if st.button("✅ SUBMIT QUIZ", use_container_width=True):
+        if st.button("✅ SUBMIT QUIZ", use_container_width=True, type="primary"):
             correct = 0
-            for i, question in enumerate(st.session_state.quiz_questions):
-                if st.session_state.quiz_answers.get(i) == question['correct_index']:
-                    correct += 1
+            results = []
             
-            score = (correct / len(st.session_state.quiz_questions)) * 100
-            
-            st.markdown(f"""
-            <div class="info-box" style="background: {'linear-gradient(135deg, #00FF88 0%, #00CC6E 100%)' if score >= 70 else 'linear-gradient(135deg, #FF6B6B 0%, #EE5A52 100%)'};">
-                <h2 style="color: white; margin: 0;">Your Score: {score:.0f}%</h2>
-                <p style="color: white; margin: 5px 0 0 0;">{correct} out of {len(st.session_state.quiz_questions)} correct</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Show explanations
-            st.markdown("### 📚 Explanations")
             for i, question in enumerate(st.session_state.quiz_questions):
                 user_answer = st.session_state.quiz_answers.get(i)
                 correct_answer = question['correct_index']
                 is_correct = user_answer == correct_answer
                 
+                if is_correct:
+                    correct += 1
+                
+                results.append({
+                    'question': question['question'],
+                    'user_answer': question['options'][user_answer] if user_answer is not None else 'Not answered',
+                    'correct_answer': question['options'][correct_answer],
+                    'is_correct': is_correct,
+                    'explanation': question['explanation']
+                })
+            
+            score = (correct / len(st.session_state.quiz_questions)) * 100
+            
+            # Score display
+            if score >= 80:
+                st.balloons()
                 st.markdown(f"""
-                **Question {i+1}:** {question['question']}
-                
-                {'✅' if is_correct else '❌'} Your answer: {question['options'][user_answer] if user_answer is not None else 'Not answered'}
-                
-                ✔️ Correct answer: {question['options'][correct_answer]}
-                
-                💡 Explanation: {question['explanation']}
-                """)
-                st.markdown("---")
+                <div class="info-box" style="background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);">
+                    <h2>🎉 Excellent! {score:.0f}%</h2>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">{correct} out of {len(st.session_state.quiz_questions)} correct - You're crushing it!</p>
+                </div>
+                """, unsafe_allow_html=True)
+            elif score >= 60:
+                st.markdown(f"""
+                <div class="info-box" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                    <h2>👍 Good Job! {score:.0f}%</h2>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">{correct} out of {len(st.session_state.quiz_questions)} correct - Keep practicing!</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="info-box" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);">
+                    <h2>💪 Keep Learning! {score:.0f}%</h2>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">{correct} out of {len(st.session_state.quiz_questions)} correct - Review and try again!</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Detailed results
+            st.markdown("### 📚 Review Answers")
+            for i, result in enumerate(results):
+                with st.expander(f"Question {i+1}: {'✅' if result['is_correct'] else '❌'}"):
+                    st.write(f"**Your answer:** {result['user_answer']}")
+                    st.write(f"**Correct answer:** {result['correct_answer']}")
+                    st.write(f"**Explanation:** {result['explanation']}")
     else:
-        st.info("📭 No quiz available. Generate your first quiz above!")
+        st.info("""
+        📭 **No quiz available!**
+        
+        Generate your first quiz by:
+        1. Choosing a topic (optional)
+        2. Selecting number of questions
+        3. Setting difficulty level
+        4. Generating from your study materials
+        """)
 
 # ============ Footer ============
 st.markdown("---")
 st.markdown("""
-<div style="text-align: center; background: linear-gradient(90deg, #00D4FF 0%, #B100FF 100%); padding: 20px; border-radius: 10px;">
+<div style="text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 20px; margin-top: 30px;">
     <h3 style="color: white; margin: 0;">BUILT FOR HACKATHON 2025 🚀</h3>
-    <p style="color: white; margin: 5px 0 0 0;">PrepPal - Learn Smarter, Not Harder</p>
+    <p style="color: white; margin: 10px 0 0 0; font-size: 1.1rem;">PrepPal - Learn Smarter, Not Harder</p>
+    <p style="color: white; margin: 5px 0 0 0; opacity: 0.8;">AI-Powered Study Assistant</p>
 </div>
 """, unsafe_allow_html=True)
