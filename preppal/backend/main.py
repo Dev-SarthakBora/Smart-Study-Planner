@@ -1,6 +1,7 @@
 """
 PrepPal Backend API
 FastAPI backend for RAG-based study assistant with quiz generation and study planning
+Now fully integrated with Google Gemini AI
 """
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -13,9 +14,18 @@ import json
 import uuid
 import os
 from dotenv import load_dotenv
+import google.generativeai as genai
+import fitz  # PyMuPDF for PDF processing
 
 # Load environment variables
 load_dotenv()
+
+# Configure Gemini API
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY not found in .env file")
+
+genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="PrepPal API", version="1.0.0")
 
@@ -77,20 +87,32 @@ def chunk_text(text: str, chunk_size: int = 500) -> List[str]:
     for i in range(0, len(words), chunk_size):
         chunk = ' '.join(words[i:i + chunk_size])
         chunks.append(chunk)
-    return chunks
+    return chunks if chunks else [""]
 
 def create_embeddings(texts: List[str]) -> np.ndarray:
     """
-    Create embeddings for text chunks
-    In production, use google-generativeai embeddings
-    For prototype, returns random embeddings
+    Create embeddings for text chunks using Gemini embedding model
     """
-    # Stub: Generate random embeddings (768 dimensions)
-    # Replace with: genai.embed_content(model="models/embedding-001", content=texts)
-    embeddings = np.random.randn(len(texts), 768)
-    # Normalize embeddings
-    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-    return embeddings
+    try:
+        embeddings_list = []
+        for text in texts:
+            result = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+                task_type="retrieval_document"
+            )
+            embeddings_list.append(result['embedding'])
+        
+        embeddings = np.array(embeddings_list)
+        # Normalize embeddings
+        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        return embeddings
+    except Exception as e:
+        print(f"Error creating embeddings: {str(e)}")
+        # Fallback to random embeddings if API fails
+        embeddings = np.random.randn(len(texts), 768)
+        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        return embeddings
 
 def cosine_similarity(query_embedding: np.ndarray, doc_embeddings: np.ndarray) -> np.ndarray:
     """Calculate cosine similarity between query and document embeddings"""
@@ -99,8 +121,18 @@ def cosine_similarity(query_embedding: np.ndarray, doc_embeddings: np.ndarray) -
 
 def retrieve_relevant_chunks(query: str, doc_ids: Optional[List[str]] = None, top_k: int = 5) -> List[Dict]:
     """Retrieve top-k most relevant chunks using cosine similarity"""
-    # Create query embedding
-    query_embedding = create_embeddings([query])[0]
+    try:
+        # Create query embedding with retrieval_query task type
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=query,
+            task_type="retrieval_query"
+        )
+        query_embedding = np.array(result['embedding'])
+        query_embedding = query_embedding / np.linalg.norm(query_embedding)
+    except Exception as e:
+        print(f"Error creating query embedding: {str(e)}")
+        return []
     
     # Collect all chunks and embeddings
     all_chunks = []
@@ -143,15 +175,15 @@ def retrieve_relevant_chunks(query: str, doc_ids: Optional[List[str]] = None, to
 
 def generate_answer_with_llm(query: str, context_chunks: List[Dict]) -> str:
     """
-    Generate answer using LLM with RAG
-    In production, use google-generativeai
+    Generate answer using Gemini with RAG
     """
-    # Build context from retrieved chunks
-    context = "\n\n".join([f"[Source: {c['source']['filename']}, Chunk {c['source']['chunk_index']}]\n{c['text']}" 
-                           for c in context_chunks])
-    
-    # Prompt template for RAG
-    prompt = f"""You are PrepPal, a helpful study assistant. Answer the student's question using ONLY the information provided in the context below. If the answer cannot be found in the context, say "I couldn't find that information in your study materials."
+    try:
+        # Build context from retrieved chunks
+        context = "\n\n".join([f"[Source: {c['source']['filename']}, Chunk {c['source']['chunk_index']}]\n{c['text']}" 
+                               for c in context_chunks])
+        
+        # Prompt template for RAG
+        prompt = f"""You are PrepPal, a helpful study assistant. Answer the student's question using ONLY the information provided in the context below. If the answer cannot be found in the context, say "I couldn't find that information in your study materials."
 
 Context:
 {context}
@@ -159,61 +191,87 @@ Context:
 Question: {query}
 
 Answer:"""
-    
-    # Stub: Mock LLM response
-    # Replace with: genai.GenerativeModel('gemini-pro').generate_content(prompt)
-    if not context_chunks:
-        return "I don't have any study materials to reference yet. Please upload some documents first!"
-    
-    return f"Based on your study materials, here's what I found: The documents cover information related to '{query}'. [This is a prototype response - in production, Gemini would provide a detailed answer based on the context.]"
+        
+        if not context_chunks:
+            return "I don't have any study materials to reference yet. Please upload some documents first!"
+        
+        # Generate response using Gemini
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        
+        return response.text
+    except Exception as e:
+        print(f"Error generating answer: {str(e)}")
+        return f"I encountered an error while generating the answer. Please try again."
 
 def generate_quiz_with_llm(topic: str, context_chunks: List[Dict], num_questions: int = 5) -> List[QuizQuestion]:
     """
-    Generate quiz questions using LLM
-    In production, use google-generativeai with structured output
+    Generate quiz questions using Gemini with structured output
     """
-    # Stub: Mock quiz generation
-    # Replace with proper Gemini API call requesting JSON output
-    
-    quiz_questions = [
-        QuizQuestion(
-            question=f"What is the key concept related to {topic}?",
-            options=["Option A", "Option B", "Option C", "Option D"],
-            correct_index=0,
-            explanation=f"This concept is fundamental to understanding {topic}."
-        ),
-        QuizQuestion(
-            question=f"Which statement best describes {topic}?",
-            options=["Statement 1", "Statement 2", "Statement 3", "Statement 4"],
-            correct_index=1,
-            explanation=f"This accurately captures the essence of {topic}."
-        ),
-        QuizQuestion(
-            question=f"How does {topic} apply in practice?",
-            options=["Application A", "Application B", "Application C", "Application D"],
-            correct_index=2,
-            explanation=f"Practical application of {topic} is demonstrated here."
-        ),
-        QuizQuestion(
-            question=f"What is the relationship between {topic} and related concepts?",
-            options=["Relationship 1", "Relationship 2", "Relationship 3", "Relationship 4"],
-            correct_index=0,
-            explanation=f"Understanding connections helps master {topic}."
-        ),
-        QuizQuestion(
-            question=f"Which scenario best illustrates {topic}?",
-            options=["Scenario A", "Scenario B", "Scenario C", "Scenario D"],
-            correct_index=3,
-            explanation=f"This example clearly demonstrates {topic}."
-        )
-    ]
-    
-    return quiz_questions[:num_questions]
+    try:
+        # Build context from chunks
+        context = "\n\n".join([chunk['text'] for chunk in context_chunks[:5]])  # Use top 5 chunks
+        
+        prompt = f"""You are an expert quiz generator. Based on the following study material about {topic}, create {num_questions} multiple-choice questions.
+
+Study Material:
+{context}
+
+Generate exactly {num_questions} multiple-choice questions in JSON format. Each question should have:
+- question: A clear, specific question
+- options: Exactly 4 answer options (as an array)
+- correct_index: The index (0-3) of the correct answer
+- explanation: A brief explanation of why the answer is correct
+
+Return ONLY a valid JSON array of questions, no additional text. Format:
+[
+  {{
+    "question": "Question text here?",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correct_index": 0,
+    "explanation": "Explanation here."
+  }}
+]"""
+
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        
+        # Parse JSON response
+        response_text = response.text.strip()
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif response_text.startswith("```"):
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        questions_data = json.loads(response_text)
+        
+        # Convert to QuizQuestion objects
+        quiz_questions = []
+        for q_data in questions_data[:num_questions]:
+            quiz_questions.append(QuizQuestion(
+                question=q_data['question'],
+                options=q_data['options'],
+                correct_index=q_data['correct_index'],
+                explanation=q_data['explanation']
+            ))
+        
+        return quiz_questions
+    except Exception as e:
+        print(f"Error generating quiz: {str(e)}")
+        # Fallback to generic questions
+        return [
+            QuizQuestion(
+                question=f"What is a key concept in {topic}?",
+                options=["Concept A", "Concept B", "Concept C", "Concept D"],
+                correct_index=0,
+                explanation=f"This is a fundamental concept in {topic}."
+            )
+        ] * min(num_questions, 5)
 
 def generate_study_plan(exam_date: str, hours_per_day: float, subjects: List[str]) -> List[Dict]:
     """
-    Generate a day-by-day study plan
-    In production, use google-generativeai for personalized planning
+    Generate a personalized study plan using Gemini
     """
     try:
         exam_datetime = datetime.strptime(exam_date, "%Y-%m-%d")
@@ -223,10 +281,61 @@ def generate_study_plan(exam_date: str, hours_per_day: float, subjects: List[str
         if days_until_exam <= 0:
             days_until_exam = 7  # Default to 1 week if date is past
         
-        plan = []
-        total_hours = days_until_exam * hours_per_day
-        hours_per_subject = total_hours / len(subjects) if subjects else 0
+        # Generate plan with Gemini
+        prompt = f"""Create a detailed {days_until_exam}-day study plan for the following:
+- Exam Date: {exam_date}
+- Daily Study Hours: {hours_per_day}
+- Subjects: {', '.join(subjects)}
+
+Generate a day-by-day breakdown in JSON format. Each day should include:
+- day: day number (1 to {days_until_exam})
+- subject: which subject to focus on
+- hours: study hours for that day
+- topics: array of 2-3 specific topics to cover
+- tips: a brief study tip for that day
+
+Distribute subjects evenly across days. Return ONLY valid JSON array, no additional text:
+[
+  {{
+    "day": 1,
+    "subject": "Subject Name",
+    "hours": {hours_per_day},
+    "topics": ["Topic 1", "Topic 2"],
+    "tips": "Study tip here"
+  }}
+]"""
+
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
         
+        # Parse response
+        response_text = response.text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif response_text.startswith("```"):
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        plan_data = json.loads(response_text)
+        
+        # Add dates and completed status
+        plan = []
+        for i, day_plan in enumerate(plan_data[:days_until_exam]):
+            date = today + timedelta(days=i)
+            plan.append({
+                "day": day_plan.get('day', i + 1),
+                "date": date.strftime("%Y-%m-%d"),
+                "subject": day_plan.get('subject', subjects[i % len(subjects)]),
+                "hours": day_plan.get('hours', hours_per_day),
+                "topics": day_plan.get('topics', []),
+                "tips": day_plan.get('tips', ''),
+                "completed": False
+            })
+        
+        return plan
+    except Exception as e:
+        print(f"Error generating study plan: {str(e)}")
+        # Fallback to simple plan
+        plan = []
         for day in range(days_until_exam):
             date = today + timedelta(days=day)
             subject_index = day % len(subjects) if subjects else 0
@@ -237,30 +346,52 @@ def generate_study_plan(exam_date: str, hours_per_day: float, subjects: List[str
                 "date": date.strftime("%Y-%m-%d"),
                 "subject": current_subject,
                 "hours": hours_per_day,
-                "topics": [f"{current_subject} - Topic {(day // len(subjects)) + 1}" if subjects else "Review materials"],
+                "topics": [f"{current_subject} - Topic {(day // len(subjects)) + 1}"],
+                "tips": "Review and practice consistently",
                 "completed": False
             })
         
         return plan
+
+def extract_text_from_pdf(content: bytes) -> str:
+    """Extract text from PDF using PyMuPDF"""
+    try:
+        doc = fitz.open(stream=content, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        doc.close()
+        return text.strip()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        print(f"Error extracting PDF text: {str(e)}")
+        return ""
 
 # ============ API Endpoints ============
 
 @app.get("/")
 def read_root():
-    return {"message": "PrepPal API is running!", "version": "1.0.0"}
+    return {
+        "message": "PrepPal API is running with Gemini AI!", 
+        "version": "1.0.0",
+        "gemini_configured": bool(GEMINI_API_KEY)
+    }
 
 @app.post("/upload")
 async def upload_document(file: UploadFile = File(...), subject: Optional[str] = None):
     """Upload and process a PDF document"""
     try:
+        # Validate file type
+        if not file.filename.endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        
         # Read file content
         content = await file.read()
         
-        # Extract text from PDF (stub - in production use PyMuPDF)
-        # Replace with: import fitz; doc = fitz.open(stream=content, filetype="pdf")
-        text = f"Sample text content from {file.filename}. This is a prototype. In production, actual PDF text would be extracted using PyMuPDF. The document covers various topics including data communication, computer networks, and networking protocols."
+        # Extract text from PDF
+        text = extract_text_from_pdf(content)
+        
+        if not text:
+            raise HTTPException(status_code=400, detail="Could not extract text from PDF. The file may be empty or corrupted.")
         
         # Generate unique document ID
         doc_id = str(uuid.uuid4())
@@ -268,7 +399,7 @@ async def upload_document(file: UploadFile = File(...), subject: Optional[str] =
         # Chunk the text
         chunks = chunk_text(text)
         
-        # Create embeddings
+        # Create embeddings using Gemini
         embeddings = create_embeddings(chunks)
         
         # Store document
@@ -289,6 +420,8 @@ async def upload_document(file: UploadFile = File(...), subject: Optional[str] =
             "subject": subject or "General",
             "message": "Document uploaded and processed successfully"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
@@ -299,7 +432,7 @@ def chat(request: ChatRequest):
         # Retrieve relevant chunks
         relevant_chunks = retrieve_relevant_chunks(request.message, request.doc_ids)
         
-        # Generate answer using LLM
+        # Generate answer using Gemini
         answer = generate_answer_with_llm(request.message, relevant_chunks)
         
         # Format sources
@@ -342,16 +475,21 @@ def generate_quiz(request: QuizRequest):
             for doc_id in request.doc_ids:
                 if doc_id in documents_store:
                     doc = documents_store[doc_id]
-                    for i, chunk in enumerate(doc['chunks'][:3]):  # Use first 3 chunks
+                    for i, chunk in enumerate(doc['chunks'][:5]):  # Use first 5 chunks
                         context_chunks.append({
                             'text': chunk,
                             'source': {'filename': doc['filename'], 'chunk_index': i}
                         })
         
-        # Generate quiz questions
+        if not context_chunks:
+            raise HTTPException(status_code=400, detail="No documents found. Please upload documents first.")
+        
+        # Generate quiz questions using Gemini
         questions = generate_quiz_with_llm(topic, context_chunks, request.num_questions)
         
         return QuizResponse(questions=questions)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Quiz generation failed: {str(e)}")
 
@@ -397,6 +535,16 @@ def delete_document(doc_id: str):
         return {"message": f"Document {filename} deleted successfully"}
     else:
         raise HTTPException(status_code=404, detail="Document not found")
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "gemini_configured": bool(GEMINI_API_KEY),
+        "documents_count": len(documents_store),
+        "timestamp": datetime.now().isoformat()
+    }
 
 if __name__ == "__main__":
     import uvicorn
