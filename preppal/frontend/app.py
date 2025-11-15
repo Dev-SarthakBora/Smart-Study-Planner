@@ -11,7 +11,7 @@ import json
 from typing import List, Dict
 import time
 import uuid
-
+import streamlit.components.v1 as components
 # ============ Configuration ============
 API_BASE_URL = "http://localhost:8000"
 
@@ -605,7 +605,6 @@ with tab3:
     with col1:
         st.markdown(f"#### 💬 {st.session_state.chat_sessions.get(st.session_state.current_chat_id, {}).get('name', 'New Chat')}")
 
-import streamlit.components.v1 as components
 
 components.html(f"""
 <style>
