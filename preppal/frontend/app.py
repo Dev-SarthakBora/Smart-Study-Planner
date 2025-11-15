@@ -604,7 +604,227 @@ with tab3:
     
     with col1:
         st.markdown(f"#### 💬 {st.session_state.chat_sessions.get(st.session_state.current_chat_id, {}).get('name', 'New Chat')}")
-    
+
+import streamlit.components.v1 as components
+
+components.html(f"""
+<style>
+  .big-mic-wrap {{ display:flex; align-items:center; gap:12px; margin: 12px 0; }}
+  .big-mic {{ width:96px; height:96px; border-radius:48px; display:flex; align-items:center; justify-content:center;
+    background: linear-gradient(135deg,#667eea,#764ba2); box-shadow: 0 12px 30px rgba(102,126,234,0.25); cursor:pointer; }}
+  .big-mic-icon {{ font-size:44px; color:#fff; }}
+  .pp-modal {{ position: fixed; inset: 0; display:none; align-items:center; justify-content:center; background: rgba(0,0,0,0.55); z-index:9999; }}
+  .pp-panel {{ width:720px; max-width:95%; background:#fff; border-radius:12px; padding:18px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }}
+  .pp-row {{ display:flex; gap:12px; align-items:center; margin-top:12px; }}
+  .pp-field input {{ padding:8px; width:360px; border-radius:8px; border:1px solid #e6e6e6; }}
+  .pp-actions button {{ padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }}
+  .pp-primary {{ background: linear-gradient(135deg,#667eea,#764ba2); color:white; }}
+  .pp-danger {{ background:#ff6b6b; color:white; }}
+  .pp-status {{ margin-top:10px; color:#333; font-size:0.95rem; }}
+  .pp-debug {{ margin-top:8px; font-family:monospace; font-size:0.85rem; color:#444; white-space:pre-wrap; max-height:120px; overflow:auto; background:#f7f7f7; padding:8px; border-radius:6px; border:1px solid #eee; }}
+</style>
+
+<div class="big-mic-wrap">
+  <div role="button" id="ppOpen" class="big-mic" title="Click to talk to PrepPal">
+    <div class="big-mic-icon">🎙️</div>
+  </div>
+  <div style="display:flex; flex-direction:column;">
+    <div style="font-weight:700; font-size:1.05rem;">Voice Chat</div>
+    <div style="color:#666; font-size:0.9rem;">Click to open voice window and start talking</div>
+  </div>
+</div>
+
+<div id="ppModal" class="pp-modal" aria-hidden="true">
+  <div class="pp-panel" role="dialog" aria-modal="true">
+    <h3>Talk to PrepPal — Live Voice</h3>
+    <div style="margin-top:8px;">Channel: <input id="ppChannel" value="preppl_channel" /></div>
+    <div class="pp-row">
+      <div class="pp-actions">
+        <button id="ppJoin" class="pp-primary">Join & Start Mic</button>
+        <button id="ppLeave" class="pp-danger">Leave</button>
+        <button id="ppClose">Close</button>
+      </div>
+      <div id="ppStatus" class="pp-status">Status: Idle</div>
+    </div>
+
+    <div style="margin-top:12px; font-size:0.9rem; color:#444;">
+      <strong>Note:</strong> Grant microphone access when prompted. Ensure the PrepPal agent is started on the server in the same channel.
+    </div>
+
+    <div class="pp-debug" id="ppDebug">Debug output will appear here after fetching token...</div>
+  </div>
+</div>
+
+<!-- Agora Web NG SDK -->
+<script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+
+<script>
+(function() {{
+  // MUST match your Python API base string exactly
+  const API_BASE = "{API_BASE_URL}";
+
+  const modal = document.getElementById('ppModal');
+  const openBtn = document.getElementById('ppOpen');
+  const closeBtn = document.getElementById('ppClose');
+  const joinBtn = document.getElementById('ppJoin');
+  const leaveBtn = document.getElementById('ppLeave');
+  const statusEl = document.getElementById('ppStatus');
+  const debugEl = document.getElementById('ppDebug');
+  const channelInput = document.getElementById('ppChannel');
+
+  let client = null;
+  let localAudioTrack = null;
+  let joined = false;
+  let lastToken = null;
+  let lastAppId = null;
+
+  function debug(msg) {{
+    console.log('[PrepPal debug]', msg);
+    debugEl.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
+  }}
+
+  openBtn.addEventListener('click', () => {{
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    debug('Modal opened');
+    statusEl.textContent = 'Status: Idle';
+  }});
+
+  closeBtn.addEventListener('click', async () => {{
+    await leaveChannel();
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+    debug('Modal closed');
+  }});
+
+  async function fetchToken() {{
+    debug('Fetching token from: ' + API_BASE + '/get-temp-token');
+    statusEl.textContent = 'Status: Fetching token...';
+    try {{
+      const res = await fetch(API_BASE + '/get-temp-token', {{ credentials: 'include' }});
+      const text = await res.text();
+      debug('HTTP ' + res.status + ' response body:\\n' + text);
+      if (!res.ok) {{
+        // show full body for easier debugging
+        statusEl.textContent = 'Status: Token fetch failed (see debug)';
+        debug('Token fetch failed: ' + text);
+        return null;
+      }}
+      // parse JSON if possible
+      let data = null;
+      try {{
+        data = JSON.parse(text);
+      }} catch (e) {{
+        debug('Failed to parse JSON: ' + e + '\\nBody:' + text);
+        statusEl.textContent = 'Status: Token parse failed (see debug)';
+        return null;
+      }}
+      // show what server returned in UI
+      statusEl.textContent = 'Status: Token fetched';
+      debug('Parsed response:\\n' + JSON.stringify(data, null, 2));
+      if (!data.appId || (!data.token && !data.token_masked)) {{
+        statusEl.textContent = 'Status: Server returned no appId/token. Check /get-temp-token';
+        return null;
+      }}
+      // prefer token field if present else fallback to token_masked presence (masked only used for debug)
+      lastAppId = data.appId;
+      // If server returned only masked token, we still proceed (we expect real token in production)
+      lastToken = data.token || (data.token_masked ? null : null);
+      // show masked token if it exists
+      debug('appId: ' + data.appId + '\\ntoken_masked: ' + (data.token_masked || '(none)') + '\\ntoken_used_is_client: ' + (data.token_used_is_client));
+      // return whole object so joinChannel can decide
+      return data;
+    }} catch (err) {{
+      debug('Fetch exception: ' + err);
+      statusEl.textContent = 'Status: Token fetch exception (see debug)';
+      return null;
+    }}
+  }}
+
+  async function joinChannel() {{
+    if (joined) {{
+      debug('Already joined');
+      return;
+    }}
+    statusEl.textContent = 'Status: Fetching token...';
+    const channel = channelInput.value || 'preppl_channel';
+    const data = await fetchToken();
+    if (!data) return;
+
+    // If server gave only masked token (debug endpoint), we must call the same endpoint that returns real token in production.
+    // For now if data.token is absent, attempt to read the token from a field 'token' (if present) else abort.
+    if (!data.token) {{
+      // If you see this message, your server returned only a masked token for debug.
+      statusEl.textContent = 'Status: Server returned masked token only; ensure /get-temp-token returns real token field "token"';
+      debug('Aborting join: no usable token in server response.');
+      return;
+    }}
+
+    const APPID = data.appId;
+    const TOKEN = data.token; // real token must be here (not token_masked)
+    debug('Using APPID:' + APPID + ' TOKEN masked:' + (data.token_masked || '(no masked)'));
+
+    try {{
+      client = AgoraRTC.createClient({{ mode: 'rtc', codec: 'vp8' }});
+      client.on('user-published', async (user, mediaType) => {{
+        try {{
+          await client.subscribe(user, mediaType);
+          if (mediaType === 'audio') {{
+            const remoteAudioTrack = user.audioTrack;
+            remoteAudioTrack.play();
+            console.log('Playing remote audio');
+          }}
+        }} catch(e) {{
+          console.error('subscribe error', e);
+        }}
+      }});
+
+      client.on('user-unpublished', (user) => {{
+        console.log('user unpublished', user);
+      }});
+
+      statusEl.textContent = 'Status: Joining channel...';
+      const uid = await client.join(APPID, channel, TOKEN, null);
+      localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      await client.publish([localAudioTrack]);
+      joined = true;
+      statusEl.textContent = 'Status: Joined. Microphone ON (UID=' + uid + ')';
+      debug('Joined channel ' + channel + ' uid=' + uid);
+    }} catch (err) {{
+      console.error('joinChannel error', err);
+      statusEl.textContent = 'Status: Join failed — see debug';
+      debug('joinChannel error: ' + (err.message || err));
+    }}
+  }}
+
+  async function leaveChannel() {{
+    if (!joined) return;
+    try {{
+      if (localAudioTrack) {{
+        localAudioTrack.close();
+        localAudioTrack = null;
+      }}
+      await client.leave();
+      joined = false;
+      statusEl.textContent = 'Status: Left channel';
+      debug('Left channel');
+    }} catch (err) {{
+      console.error('leaveChannel error', err);
+      statusEl.textContent = 'Status: Leave failed';
+      debug('leaveChannel error: ' + (err.message || err));
+    }}
+  }}
+
+  joinBtn.addEventListener('click', joinChannel);
+  leaveBtn.addEventListener('click', leaveChannel);
+
+}})();
+</script>
+""", height=320, scrolling=True)
+
+
+
+  
    # ---------- Agora Agent Controls (add inside Chat tab near voice toggle) ----------
 if 'agora_agent' not in st.session_state:
     st.session_state.agora_agent = {"agent_id": None, "status": None, "channel": None}

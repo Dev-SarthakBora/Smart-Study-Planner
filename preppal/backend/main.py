@@ -23,6 +23,7 @@ import fitz  # PyMuPDF for PDF processing
 import base64
 import requests
 import logging
+from fastapi.responses import JSONResponse
 logger = logging.getLogger("preppal")
 logging.basicConfig(level=logging.INFO)
 # Load environment variables
@@ -100,7 +101,37 @@ class PlanResponse(BaseModel):
     total_hours: float
 
 # ============ Helper Functions ============
+@app.get("/get-temp-token")
+def get_temp_token_debug():
+    """
+    Debug get-temp-token: returns appId and client token (falls back to agent token).
+    Also returns masked values so you can see what the running process sees.
+    """
+    app_id = os.getenv("AGORA_APP_ID", "").strip()
+    client_token = os.getenv("AGORA_TEMP_CLIENT_TOKEN", "").strip()
+    agent_token = os.getenv("AGORA_TEMP_AGENT_TOKEN", "").strip()
 
+    # Log exact presence (do NOT print secrets in logs)
+    print("DEBUG env: AGORA_APP_ID present?", bool(app_id))
+    print("DEBUG env: AGORA_TEMP_CLIENT_TOKEN present?", bool(client_token))
+    print("DEBUG env: AGORA_TEMP_AGENT_TOKEN present?", bool(agent_token))
+
+    if not app_id:
+        return JSONResponse(status_code=400, content={"error":"AGORA_APP_ID not set in server environment"})
+
+    # use client token if available, else agent token (local dev only)
+    token = client_token or agent_token
+    if not token:
+        return JSONResponse(status_code=400, content={"error":"AGORA_TEMP_CLIENT_TOKEN or AGORA_TEMP_AGENT_TOKEN not set in server environment"})
+
+    # return masked token so we can confirm it's being returned
+    masked = token[:8] + "..." + token[-6:] if len(token) > 20 else "****(short)****"
+    return {
+        "appId": app_id,
+        "token": token,                # <-- REAL TOKEN HERE
+        "token_masked": masked,        # <-- for UI display
+        "token_used_is_client": True
+    }
 
 
 
